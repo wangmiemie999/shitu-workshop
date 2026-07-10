@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>角色塑造工作室 · 拾图工坊</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/character.css" />
+  </head>
+  <body class="character-page">
+    <header class="topbar">
+      <a class="brand" href="/"><span class="brand-logo" aria-hidden="true"><b>图</b><i></i></span><span>拾图工坊</span></a>
+      <a class="back-link" href="/">← 返回文章配图</a>
+    </header>
+    <main class="character-main">
+      <section class="character-intro">
+        <p class="eyebrow">CHARACTER SHAPING ROOM</p>
+        <h1>先造一个角色，<br /><em>再让它进入文章。</em></h1>
+        <p>这里定义的是反复出现的“同一个人”。保存后，角色外形与气质会进入每张插图的生成提示词。</p>
+      </section>
+
+      <div class="character-workbench">
+        <form class="character-form" id="characterForm">
+          <div class="form-title"><span>01</span><div><h2>角色档案</h2><p>不要把细节堆满。一个好角色通常只靠两三个特征被记住。</p></div></div>
+          <div class="profile-label">选择角色创建方式</div>
+          <div class="profile-templates" id="profileTemplates">
+            <button class="profile-template active" data-profile="meimei" type="button"><span class="profile-icon meimei"><img src="/characters/meimei-avatar.png" alt="" /></span><b>咩咩角色</b><small>使用定稿形象</small></button>
+            <button class="profile-template" data-profile="custom" type="button"><span class="profile-icon custom"><i></i></span><b>自定义角色</b><small>进入照片生成流程</small></button>
+          </div>
+          <label>角色名字<input id="characterName" maxlength="20" value="咩咩" placeholder="给角色起个名字" /></label>
+          <div class="two-fields advanced-character-fields">
+            <label>角色比例<select id="characterProportion"><option value="natural">自然人物</option><option value="light-cartoon">轻卡通</option><option value="chibi">Q版</option></select></label>
+            <label>保留重点<select id="characterPreserve"><option value="hair-face">发型与脸型</option><option value="hair">发型优先</option><option value="outfit">整体穿搭优先</option></select></label>
+          </div>
+          <div class="two-fields advanced-character-fields">
+            <label>服装风格<select id="characterOutfit"><option value="original">保留原图</option><option value="casual">简约日常</option><option value="business">清爽职场</option><option value="creator">创作者工装</option></select></label>
+            <label>标志元素<select id="characterSignature"><option value="none">无</option><option value="hairpin">简洁发饰</option><option value="glasses">眼镜</option><option value="toolbag">小工具包</option></select></label>
+          </div>
+          <label>补充设定 <span>可选，最多 100 字</span><textarea id="characterCustom" maxlength="100" rows="3" placeholder="例如：保留自然卷发；衣服不要出现复杂图案……"></textarea></label>
+          <div class="character-actions">
+            <button class="secondary" id="resetCharacter" type="button">恢复咩咩</button>
+          </div>
+        </form>
+
+        <aside class="character-preview-panel">
+          <div class="preview-top"><span>02</span><div><h2>角色试衣镜</h2><p>这是轮廓预览，真实定妆图由图像模型生成。</p></div></div>
+          <div class="character-stage">
+            <div class="stage-line"></div>
+            <div class="character-figure archetype-creature shape-bean eyes-dots expression-serious accessory-none" id="characterFigure">
+              <div class="hat"></div><div class="eyes"><i></i><i></i></div><div class="scarf"></div><div class="bag"></div><div class="pencil"></div><div class="legs"><i></i><i></i></div>
+            </div>
+            <span class="figure-note" id="figureNote">认真，但不知道为什么这么认真。</span>
+          </div>
+          <div class="character-spec" id="characterSpec">咩咩 · 极简线稿 · 高盘发 · 安静好奇</div>
+          <div class="photo-upload" id="photoUpload" hidden>
+            <label for="characterPhoto"><b>上传一张角色照片</b><small>支持 JPG、PNG、WEBP，建议正面清晰头像或半身照；推荐照片不低于 1024×1024 像素，最大 10MB</small></label>
+            <input id="characterPhoto" type="file" accept="image/png,image/jpeg,image/webp" />
+            <div class="photo-placeholder" id="photoPlaceholder" aria-hidden="true">
+              <span>＋</span>
+              <b>照片上传后会显示在这里</b>
+              <small>建议使用光线清楚、脸部完整的照片</small>
+            </div>
+            <img id="photoPreview" alt="待生成角色照片预览" hidden />
+          </div>
+          <button class="generate-character" id="generateCharacter" type="button"><span>生成一张角色定妆图</span><small>会调用图像 API</small></button>
+          <p class="generation-status" id="generationStatus" aria-live="polite"></p>
+          <div class="generated-character" id="generatedCharacter" hidden></div>
+          <button class="primary save-preview-character" id="saveCharacter" type="button" hidden><span>确认保存并用于插图</span><b>→</b></button>
+        </aside>
+      </div>
+    </main>
+    <div class="toast" id="toast" role="status"></div>
+    <script type="module" src="/character.js"></script>
+  </body>
+</html>
