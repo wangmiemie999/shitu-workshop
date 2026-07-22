@@ -6,8 +6,8 @@ const defaultStyle = { ...(styleOptions[savedStyle] || styleOptions.xiaohei) };
 const defaultCharacter = { id: "meimei", enabled: true, archetype: "custom", name: "咩咩", shape: "bean", eyes: "dots", expression: "curious", accessory: "none", personality: "温柔、专注、安静好奇", custom: "极简黑白手绘女性角色；始终保留高盘发、额前弧形碎发和两侧松散发丝；只使用少量橙色点缀", referenceUrl: "/characters/meimei.png" };
 const LIBRARY_KEY = "peitu-character-library";
 const SELECTED_CHARACTER_KEY = "peitu-selected-character-id";
-const USERS_KEY = "shitu-users";
-const SESSION_USER_KEY = "shitu-current-user";
+const TOKEN_KEY = "imagecraft-token";
+const authState = { user: null };
 function readCharacterLibrary() {
   let library = [];
   try {
@@ -29,8 +29,6 @@ const selectedCharacterId = localStorage.getItem(SELECTED_CHARACTER_KEY);
 const savedCharacter = characterLibrary.find((item) => item.id === selectedCharacterId) || characterLibrary[0] || defaultCharacter;
 const state = { step: 1, count: 1, shots: [], activeShots: [], results: [], style: { ...defaultStyle, character: savedCharacter }, character: savedCharacter };
 let characterSearchTerm = "";
-let demoSmsCode = "";
-let demoSmsPhone = "";
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
@@ -48,10 +46,28 @@ function toast(message) {
 }
 
 async function request(url, options = {}) {
-  const response = await fetch(url, { ...options, headers: { "content-type": "application/json", ...(options.headers || {}) } });
+  const token = localStorage.getItem(TOKEN_KEY);
+  const auth = token ? { authorization: `Bearer ${token}` } : {};
+  const response = await fetch(url, { ...options, headers: { "content-type": "application/json", ...auth, ...(options.headers || {}) } });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "请求失败");
+  if (!response.ok) {
+    const error = new Error(data.error || "请求失败");
+    error.status = response.status;
+    throw error;
+  }
   return data;
+}
+
+async function fetchMe() {
+  if (!localStorage.getItem(TOKEN_KEY)) { authState.user = null; return null; }
+  try {
+    const data = await request("/api/me");
+    authState.user = data.user;
+  } catch {
+    authState.user = null;
+    localStorage.removeItem(TOKEN_KEY);
+  }
+  return authState.user;
 }
 
 function go(step) {
@@ -92,22 +108,8 @@ function escapeHtml(text = "") {
   return String(text).replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]);
 }
 
-function readUsers() {
-  try {
-    const users = JSON.parse(localStorage.getItem(USERS_KEY) || "[]");
-    return Array.isArray(users) ? users : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveUsers(users) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-}
-
 function currentUser() {
-  const name = localStorage.getItem(SESSION_USER_KEY);
-  return readUsers().find((user) => user.name === name) || null;
+  return authState.user;
 }
 
 function openAuth(tab = currentUser() ? "profile" : "login") {
@@ -131,12 +133,14 @@ function renderAccount() {
   const area = $("#accountArea");
   if (!area) return;
   area.innerHTML = user ? `
-    <button class="account-entry signed-in" id="openAuth" type="button"><span>${escapeHtml(user.name)}</span><small>个人中心</small></button>
+    <button class="account-entry signed-in" id="openAuth" type="button"><span>${escapeHtml(user.phone)}</span><small>剩余 ${user.remaining} 张</small></button>
     <button class="account-logout" id="logoutButton" type="button">退出</button>
   ` : `<button class="account-entry" id="openAuth" type="button">登录 / 注册</button>`;
   $("#openAuth")?.addEventListener("click", () => openAuth(user ? "profile" : "login"));
-  $("#logoutButton")?.addEventListener("click", () => {
-    localStorage.removeItem(SESSION_USER_KEY);
+  $("#logoutButton")?.addEventListener("click", async () => {
+    try { await request("/api/auth/logout", { method: "POST" }); } catch {}
+    localStorage.removeItem(TOKEN_KEY);
+    authState.user = null;
     renderAccount();
     renderProfileForm();
     toast("已退出登录");
@@ -151,59 +155,56 @@ function renderProfileForm() {
   empty.hidden = Boolean(user);
   fields.hidden = !user;
   if (!user) return;
-  $("#profileName").value = user.name;
+  $("#profileName").value = user.phone;
+  if ($("#profileQuota")) $("#profileQuota").value = `已用 ${user.used} / 共 ${user.quota} 张（剩余 ${user.remaining} 张）`;
 }
 
-function registerUser(event) {
+async function registerUser(event) {
   event.preventDefault();
-  const name = $("#registerPhone").value.trim();
-  const code = $("#registerCode").value.trim();
+  const phone = $("#registerPhone").value.trim();
+  const invite = $("#registerInvite").value.trim();
   const password = $("#registerPassword").value;
   const confirmPassword = $("#registerPasswordConfirm").value;
-  if (!/^1\d{10}$/.test(name)) return toast("请输入 11 位手机号");
-  if (!demoSmsCode || demoSmsPhone !== name) return toast("请先获取验证码");
-  if (code !== demoSmsCode) return toast("验证码不正确");
-  if (password.length < 4) return toast("密码至少 4 位");
+  if (!/^1\d{10}$/.test(phone)) return toast("请输入 11 位手机号");
+  if (!invite) return toast("请输入邀请码");
+  if (password.length < 6) return toast("密码至少 6 位");
   if (password !== confirmPassword) return toast("两次密码不一致");
   if (!$("#registerAgreement").checked) return toast("请先同意用户协议和隐私政策");
-  const users = readUsers();
-  if (users.some((user) => user.name === name)) return toast("这个手机号已经注册");
-  users.push({ name, phone: name, password, createdAt: new Date().toISOString() });
-  saveUsers(users);
-  localStorage.setItem(SESSION_USER_KEY, name);
-  demoSmsCode = "";
-  demoSmsPhone = "";
-  $("#registerForm").reset();
-  renderAccount();
-  setAuthTab("profile");
-  toast("注册成功，已登录");
+  try {
+    const data = await request("/api/auth/register", { method: "POST", body: JSON.stringify({ phone, password, invite }) });
+    localStorage.setItem(TOKEN_KEY, data.token);
+    authState.user = data.user;
+    $("#registerForm").reset();
+    renderAccount();
+    setAuthTab("profile");
+    renderProfileForm();
+    toast(`注册成功！你有 ${data.user.quota} 张免费生成额度`);
+  } catch (error) {
+    toast(error.message);
+  }
 }
 
-function loginUser(event) {
+async function loginUser(event) {
   event.preventDefault();
-  const name = $("#loginName").value.trim();
+  const phone = $("#loginName").value.trim();
   const password = $("#loginPassword").value;
-  const user = readUsers().find((item) => item.name === name && item.password === password);
-  if (!user) return toast("账户名或密码不正确");
-  localStorage.setItem(SESSION_USER_KEY, user.name);
-  $("#loginForm").reset();
-  renderAccount();
-  setAuthTab("profile");
-  toast(`欢迎回来，${user.name}`);
+  try {
+    const data = await request("/api/auth/login", { method: "POST", body: JSON.stringify({ phone, password }) });
+    localStorage.setItem(TOKEN_KEY, data.token);
+    authState.user = data.user;
+    $("#loginForm").reset();
+    renderAccount();
+    setAuthTab("profile");
+    renderProfileForm();
+    toast(`欢迎回来，${data.user.phone}`);
+  } catch (error) {
+    toast(error.message);
+  }
 }
 
 function saveProfile(event) {
   event.preventDefault();
   toast("MVP 阶段暂无可保存资料");
-}
-
-function sendDemoCode() {
-  const phone = $("#registerPhone").value.trim();
-  if (!/^1\d{10}$/.test(phone)) return toast("请先输入 11 位手机号");
-  demoSmsPhone = phone;
-  demoSmsCode = String(Math.floor(100000 + Math.random() * 900000));
-  $("#registerCode").value = demoSmsCode;
-  toast(`演示验证码：${demoSmsCode}`);
 }
 
 function renderCharacterLibrary() {
@@ -256,11 +257,11 @@ function updateDownloadAllState() {
 }
 
 function renderResultSuccess(card, shot, result, index) {
-  card.querySelector(".art-frame").innerHTML = `<img src="${result.url}" alt="${escapeHtml(shot.title)}" />`;
+  card.querySelector(".art-frame").innerHTML = `<img src="${result.url}" alt="${escapeHtml(shot.title)}" /><span class="ai-tag">AI生成</span>`;
   card.querySelector(".art-info").innerHTML = `
     <h3>${escapeHtml(shot.title)}</h3>
     <span class="art-actions">
-      <a class="download" href="${result.url}" download="shitu-${index + 1}.png">下载 PNG ↓</a>
+      <a class="download" href="${result.url}" download="imagecraft-${index + 1}.png">下载 PNG ↓</a>
       <button class="retry-image" data-index="${index}" type="button">重新生成</button>
     </span>`;
 }
@@ -286,9 +287,16 @@ async function generateOne(index) {
     const result = await request("/api/generate", { method: "POST", body: JSON.stringify({ shot, style: state.style }) });
     state.results[index] = result;
     renderResultSuccess(card, shot, result, index);
+    if (result.quota && authState.user) {
+      authState.user.used = result.quota.used;
+      authState.user.remaining = result.quota.remaining;
+      renderAccount();
+    }
   } catch (error) {
     state.results[index] = { error: error.message };
     renderResultError(card, shot, error, index);
+    if (error.status === 401) { toast("请先登录再生成插图"); openAuth("login"); }
+    if (error.status === 403) toast(error.message);
   }
   updateDownloadAllState();
 }
@@ -360,7 +368,6 @@ $("#accountArea")?.addEventListener("click", (event) => {
 $$("[data-auth-close]").forEach((item) => item.addEventListener("click", closeAuth));
 $$(".auth-tabs button").forEach((button) => button.addEventListener("click", () => setAuthTab(button.dataset.authTab)));
 $$("[data-auth-tab-link]").forEach((button) => button.addEventListener("click", () => setAuthTab(button.dataset.authTabLink)));
-$("#sendCodeButton")?.addEventListener("click", sendDemoCode);
 $("#registerForm")?.addEventListener("submit", registerUser);
 $("#loginForm")?.addEventListener("submit", loginUser);
 $("#profileForm")?.addEventListener("submit", saveProfile);
@@ -401,7 +408,7 @@ $("#downloadAllButton").addEventListener("click", () => {
     setTimeout(() => {
       const link = document.createElement("a");
       link.href = item.url;
-      link.download = `shitu-${item.index + 1}.png`;
+      link.download = `imagecraft-${item.index + 1}.png`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -428,4 +435,5 @@ $$("#presetGrid .preset").forEach((item) => item.classList.toggle("active", item
 renderCharacterLibrary();
 renderAccount();
 renderProfileForm();
+fetchMe().then(() => { renderAccount(); renderProfileForm(); });
 syncArticle();

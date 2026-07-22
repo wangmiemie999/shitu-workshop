@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="输入中文文章，选择角色与张数，一键生成统一风格的文章配图" />
-    <title>插图工坊</title>
+    <title>ImageCraft</title>
     <script>
       if (location.protocol === "file:") location.replace("http://127.0.0.1:4173/");
     </script>
@@ -13,9 +13,9 @@
   <body>
     <div class="noise" aria-hidden="true"></div>
     <header class="topbar">
-      <a class="brand" href="/" aria-label="插图工坊首页">
-        <span class="brand-logo" aria-hidden="true"><b>图</b><i></i></span>
-        <span>插图工坊</span>
+      <a class="brand" href="/" aria-label="ImageCraft首页">
+        <span class="brand-logo" aria-hidden="true"><b style="font-size:14px;letter-spacing:0">IC</b><i></i></span>
+        <span>ImageCraft</span>
       </a>
       <div class="account-area" id="accountArea">
         <button class="account-entry" id="openAuth" type="button">登录 / 注册</button>
@@ -26,7 +26,7 @@
       <section class="hero">
         <p class="eyebrow">ARTICLE → ILLUSTRATIONS</p>
         <h1>输入一篇文章，<br /><em>生成一组配图。</em></h1>
-        <p class="intro">适合公众号、小红书、知识干货和课程内容。粘贴文章，选择角色和张数，插图工坊会先生成配图方案，再逐张输出统一风格的插图。</p>
+        <p class="intro">适合公众号、小红书、知识干货和课程内容。粘贴文章，选择角色和张数，ImageCraft会先生成配图方案，再逐张输出统一风格的插图。</p>
         <div class="hero-doodle" aria-hidden="true">
           <svg viewBox="0 0 260 160">
             <path d="M20 88c29-26 51 26 78-2s58-28 78 0 40 13 66-7" />
@@ -141,15 +141,19 @@
       </section>
     </main>
 
-    <footer><span>为文章、笔记和课程内容快速生成统一风格配图。</span><span>16:9 · 角色一致 · 可下载 PNG</span></footer>
+    <footer>
+      <span>为文章、笔记和课程内容快速生成统一风格配图。本站插图由人工智能生成。</span>
+      <span>16:9 · 角色一致 · 可下载 PNG</span>
+      <span id="icpFooter"><!-- 备案通过后替换为：<a href="https://beian.miit.gov.cn" target="_blank" rel="noopener">某ICP备XXXXXXXX号</a> --></span>
+    </footer>
     <div class="auth-modal" id="authModal" hidden>
       <div class="auth-backdrop" data-auth-close></div>
       <section class="auth-panel" role="dialog" aria-modal="true" aria-labelledby="authTitle">
         <button class="auth-close" data-auth-close type="button" aria-label="关闭">×</button>
         <div class="auth-head">
           <p class="eyebrow">LOCAL ACCOUNT MVP</p>
-          <h2 id="authTitle">插图工坊账户</h2>
-          <p>用于演示手机号注册登录流程，当前版本仅保存在本地浏览器，验证码为本地演示验证码。</p>
+          <h2 id="authTitle">ImageCraft账户</h2>
+          <p>内测阶段凭邀请码注册。每个账号享有免费生成额度，登录后即可开始创作。</p>
         </div>
         <div class="auth-tabs" role="tablist">
           <button class="active" data-auth-tab="login" type="button">登录</button>
@@ -163,15 +167,10 @@
         </form>
         <form class="auth-form" id="registerForm" data-auth-panel="register">
           <div class="auth-switch-line">已有账号？<button data-auth-tab-link="login" type="button">去登录</button></div>
-          <label>手机号
-            <span class="code-row">
-              <input id="registerPhone" maxlength="11" autocomplete="tel" inputmode="tel" placeholder="请输入手机号" />
-              <button id="sendCodeButton" type="button">获取验证码</button>
-            </span>
-          </label>
-          <label>短信验证码<input id="registerCode" maxlength="6" inputmode="numeric" placeholder="请输入短信验证码" /></label>
-          <label>设置密码<input id="registerPassword" type="password" minlength="4" autocomplete="new-password" placeholder="至少 4 位" /></label>
-          <label>确认密码<input id="registerPasswordConfirm" type="password" minlength="4" autocomplete="new-password" placeholder="再次输入密码" /></label>
+          <label>手机号<input id="registerPhone" maxlength="11" autocomplete="tel" inputmode="tel" placeholder="请输入手机号" /></label>
+          <label>邀请码<input id="registerInvite" maxlength="12" placeholder="内测阶段需要邀请码" style="text-transform:uppercase" /></label>
+          <label>设置密码<input id="registerPassword" type="password" minlength="6" autocomplete="new-password" placeholder="至少 6 位" /></label>
+          <label>确认密码<input id="registerPasswordConfirm" type="password" minlength="6" autocomplete="new-password" placeholder="再次输入密码" /></label>
           <label class="agreement-line"><input id="registerAgreement" type="checkbox" /> <span>同意《用户协议》《隐私政策》</span></label>
           <button class="primary auth-submit" type="submit"><span>立即注册</span><b>→</b></button>
         </form>
@@ -179,7 +178,8 @@
           <div class="profile-empty" id="profileEmpty">还没有登录。请先登录或注册一个本地账户。</div>
           <div class="profile-fields" id="profileFields" hidden>
             <label>当前手机号<input id="profileName" disabled /></label>
-            <div class="profile-empty">MVP 阶段只保存登录状态。后续接入真实短信服务和数据库后，可继续扩展头像、会员权益、作品集等功能。</div>
+            <label>免费生成额度<input id="profileQuota" disabled /></label>
+            <div class="profile-empty">内测阶段每个账号有固定生成额度。额度用完后可联系我们获取新的邀请码。</div>
           </div>
         </form>
       </section>

@@ -1,8 +1,11 @@
 import http from "node:http";
-import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildImagePrompt, makeLocalPlan } from "./lib/plan.js";
+import { loadStore, saveStore, registerUser, loginUser, createSession, getSessionUser, destroySession, publicUser } from "./lib/store.js";
+import { stampAiLabel } from "./lib/watermark.js";
+import { checkText, REJECT_MESSAGE } from "./lib/moderation.js";
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
 const PUBLIC = join(ROOT, "public");
@@ -13,6 +16,26 @@ loadEnv(join(ROOT, ".env"));
 const PORT = Number(process.env.PORT || 4173);
 const API_KEY = process.env.OPENROUTER_API_KEY || "";
 const IMAGE_MODEL = process.env.OPENROUTER_IMAGE_MODEL || "bytedance-seed/seedream-4.5";
+const IMAGE_API_URL = process.env.OPENROUTER_IMAGE_URL || "https://openrouter.ai/api/v1/images";
+const IMAGE_TIMEOUT_MS = Number(process.env.IMAGE_TIMEOUT_MS || 120000);
+const RELAY_TOKEN = process.env.RELAY_TOKEN || "";
+
+async function fetchWithRetry(url, options, retries = 1) {
+  for (let attempt = 0; ; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), IMAGE_TIMEOUT_MS);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } catch (error) {
+      if (attempt >= retries) {
+        const reason = error?.name === "AbortError" ? `生图接口超时（${IMAGE_TIMEOUT_MS / 1000}秒无响应），可能是服务器到 OpenRouter 的网络不通` : `无法连接生图接口：${error.message}`;
+        throw new Error(reason);
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
 const RUNNINGHUB_API_KEY = process.env.RUNNINGHUB_API_KEY || "";
 const RUNNINGHUB_WORKFLOW_ID = process.env.RUNNINGHUB_WORKFLOW_ID || "";
 const RUNNINGHUB_IMAGE_NODE_ID = process.env.RUNNINGHUB_IMAGE_NODE_ID || "111";
@@ -47,6 +70,18 @@ function loadEnv(path) {
     if (!match || match[1] in process.env) continue;
     process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, "");
   }
+}
+
+function logUsage(event, extra = {}) {
+  try {
+    mkdirSync(join(ROOT, "data"), { recursive: true });
+    appendFileSync(join(ROOT, "data", "usage.log"), JSON.stringify({ ts: new Date().toISOString(), event, ...extra }) + "\n");
+  } catch {}
+}
+
+function authToken(req) {
+  const header = String(req.headers.authorization || "");
+  return header.startsWith("Bearer ") ? header.slice(7) : "";
 }
 
 function json(res, status, data) {
@@ -218,13 +253,14 @@ async function generateImage(shot, style) {
     }
   }
 
-  const response = await fetch("https://openrouter.ai/api/v1/images", {
+  const response = await fetchWithRetry(IMAGE_API_URL, {
     method: "POST",
     headers: {
       authorization: `Bearer ${API_KEY}`,
       "content-type": "application/json",
       "HTTP-Referer": `http://127.0.0.1:${PORT}`,
-      "X-Title": "Illustration Workshop"
+      "X-Title": "ImageCraft",
+      ...(RELAY_TOKEN ? { "x-relay-token": RELAY_TOKEN } : {})
     },
     body: JSON.stringify(requestBody)
   });
@@ -237,7 +273,7 @@ async function generateImage(shot, style) {
   const encoded = payload?.data?.[0]?.b64_json;
   if (!encoded) throw new Error("图片接口没有返回图像数据");
   const filename = `${Date.now()}-${shot.id}.png`;
-  writeFileSync(join(OUTPUTS, filename), Buffer.from(encoded, "base64"));
+  writeFileSync(join(OUTPUTS, filename), stampAiLabel(Buffer.from(encoded, "base64")));
   return { url: `/outputs/${filename}`, demo: false, prompt };
 }
 
@@ -305,13 +341,14 @@ async function createSimpleCharacter(imageData, settings = {}) {
   let usedSize = sizes[0];
   let lastError = "";
   for (const size of sizes) {
-    const response = await fetch("https://openrouter.ai/api/v1/images", {
+    const response = await fetchWithRetry(IMAGE_API_URL, {
       method: "POST",
       headers: {
         authorization: `Bearer ${API_KEY}`,
         "content-type": "application/json",
         "HTTP-Referer": `http://127.0.0.1:${PORT}`,
-        "X-Title": "Illustration Workshop"
+        "X-Title": "ImageCraft",
+        ...(RELAY_TOKEN ? { "x-relay-token": RELAY_TOKEN } : {})
       },
       body: JSON.stringify({
         model: IMAGE_MODEL,
@@ -336,7 +373,7 @@ async function createSimpleCharacter(imageData, settings = {}) {
   const encoded = payload?.data?.[0]?.b64_json;
   if (!encoded) throw new Error("图片接口没有返回角色图像数据");
   const filename = `${Date.now()}-simple-character.png`;
-  writeFileSync(join(OUTPUTS, filename), Buffer.from(encoded, "base64"));
+  writeFileSync(join(OUTPUTS, filename), stampAiLabel(Buffer.from(encoded, "base64")));
   return { url: `/outputs/${filename}`, demo: false, prompt, size: usedSize };
 }
 
@@ -345,20 +382,76 @@ async function api(req, res, pathname) {
   if (req.method === "GET" && pathname === "/api/status") {
     return json(res, 200, { mode: API_KEY ? "live" : "demo", provider: "openrouter", model: IMAGE_MODEL, runninghub: Boolean(RUNNINGHUB_API_KEY && RUNNINGHUB_WORKFLOW_ID) });
   }
+  if (req.method === "POST" && pathname === "/api/auth/register") {
+    const data = await body(req);
+    const store = loadStore();
+    const result = registerUser(store, data);
+    if (result.error) return json(res, 400, { error: result.error });
+    const token = createSession(store, result.user.phone);
+    saveStore(store);
+    logUsage("register", { phone: result.user.phone, invite: result.user.invite });
+    return json(res, 200, { token, user: publicUser(result.user) });
+  }
+  if (req.method === "POST" && pathname === "/api/auth/login") {
+    const data = await body(req);
+    const store = loadStore();
+    const result = loginUser(store, data);
+    if (result.error) return json(res, 400, { error: result.error });
+    const token = createSession(store, result.user.phone);
+    saveStore(store);
+    return json(res, 200, { token, user: publicUser(result.user) });
+  }
+  if (req.method === "POST" && pathname === "/api/auth/logout") {
+    const store = loadStore();
+    destroySession(store, authToken(req));
+    saveStore(store);
+    return json(res, 200, { ok: true });
+  }
+  if (req.method === "GET" && pathname === "/api/me") {
+    const store = loadStore();
+    const user = getSessionUser(store, authToken(req));
+    if (!user) return json(res, 401, { error: "未登录" });
+    return json(res, 200, { user: publicUser(user) });
+  }
   if (req.method === "POST" && pathname === "/api/plan") {
     const data = await body(req);
     const article = String(data.article || "").trim();
     if (article.length < 20) return json(res, 400, { error: "请至少输入 20 个字的文章内容" });
+    const hit = checkText(article);
+    if (hit) {
+      console.warn(`[内容过滤] /api/plan 命中违禁词`);
+      return json(res, 400, { error: REJECT_MESSAGE });
+    }
     return json(res, 200, { shots: makeLocalPlan(article, data.count), mode: API_KEY ? "live" : "demo" });
   }
   if (req.method === "POST" && pathname === "/api/generate") {
     const data = await body(req);
     if (!data.shot?.id) return json(res, 400, { error: "缺少配图方案" });
-    return json(res, 200, await generateImage(data.shot, data.style));
+    const store = loadStore();
+    const user = getSessionUser(store, authToken(req));
+    if (!user) return json(res, 401, { error: "请先登录后再生成插图" });
+    if (user.used >= user.quota) return json(res, 403, { error: `你的免费生成额度（${user.quota} 张）已用完` });
+    const shotHit = checkText(data.shot.title, data.shot.coreIdea, data.shot.action, data.style?.custom, data.style?.character?.custom, data.style?.character?.name);
+    if (shotHit) {
+      console.warn(`[内容过滤] /api/generate 命中违禁词 用户:${user.phone}`);
+      return json(res, 400, { error: REJECT_MESSAGE });
+    }
+    const result = await generateImage(data.shot, data.style);
+    if (!result.demo) {
+      user.used += 1;
+      saveStore(store);
+    }
+    logUsage("generate", { phone: user.phone, demo: Boolean(result.demo) });
+    return json(res, 200, { ...result, quota: { used: user.used, total: user.quota, remaining: Math.max(0, user.quota - user.used) } });
   }
   if (req.method === "POST" && pathname === "/api/character/simple") {
     const data = await body(req);
     if (!data.image) return json(res, 400, { error: "请先上传一张角色照片" });
+    const charHit = checkText(data.settings?.name, data.settings?.custom);
+    if (charHit) {
+      console.warn(`[内容过滤] /api/character/simple 命中违禁词`);
+      return json(res, 400, { error: REJECT_MESSAGE });
+    }
     return json(res, 200, await createSimpleCharacter(data.image, data.settings));
   }
   if (req.method === "POST" && pathname === "/api/character/runninghub") {
@@ -403,6 +496,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`插图工坊已启动：http://127.0.0.1:${PORT}`);
+  console.log(`ImageCraft已启动：http://127.0.0.1:${PORT}`);
   console.log(API_KEY ? `OpenRouter 在线模式 · ${IMAGE_MODEL}` : "演示模式 · 配置 OPENROUTER_API_KEY 后启用真实生图");
 });

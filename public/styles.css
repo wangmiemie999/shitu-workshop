@@ -301,3 +301,6 @@ footer{display:block;line-height:2}
 .character-empty-state b{font-size:12px;color:var(--ink)}
 .character-empty-state small,.character-empty-state a{font-size:10px;color:var(--blue)}
 @media(max-width:760px){.character-library-head{display:block}.character-library-head small{display:block;margin-top:5px}.character-row{grid-template-columns:46px 1fr}.character-row-actions{grid-column:2;justify-content:flex-start}.character-row-image{width:46px;height:46px}}
+
+.art-frame{position:relative}
+.ai-tag{position:absolute;right:10px;bottom:10px;background:rgba(0,0,0,.55);color:#fff;font-size:11px;padding:3px 10px;border-radius:999px;pointer-events:none}
